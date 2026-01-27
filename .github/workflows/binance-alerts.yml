@@ -3,12 +3,12 @@ name: binance-alerts
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *" # 每5分钟（UTC）
+    - cron: "*/30 * * * *" # 每5分钟（UTC）
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
