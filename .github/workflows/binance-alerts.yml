@@ -1,0 +1,53 @@
+name: binance-alerts
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *" # 每5分钟（UTC）
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 关键：seen.json 用缓存保存，不然每次都会“当成新消息”狂发
+      - name: Restore cache (seen.json)
+        uses: actions/cache@v4
+        with:
+          path: data/seen.json
+          key: seen-${{ github.repository }}-${{ github.ref_name }}
+          restore-keys: |
+            seen-${{ github.repository }}-
+
+      - name: Run monitor
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+        run: |
+          python src/main.py
+
+      - name: Save cache (seen.json)
+        uses: actions/cache@v4
+        with:
+          path: data/seen.json
+          key: seen-${{ github.repository }}-${{ github.ref_name }}-${{ github.run_id }}
