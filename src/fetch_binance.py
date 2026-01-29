@@ -1,10 +1,7 @@
 from __future__ import annotations
-import re
 import requests
-from bs4 import BeautifulSoup
 from dataclasses import dataclass
 from typing import List, Optional
-from urllib.parse import urljoin
 
 BASE = "https://www.binance.com"
 
@@ -12,63 +9,94 @@ BASE = "https://www.binance.com"
 class Item:
     title: str
     url: str
-    date: Optional[str] = None  # 页面上常见 YYYY-MM-DD
+    date: Optional[str] = None
 
-def _get(url: str) -> str:
-    # 简单 UA，避免被当成机器人概率稍微低一点
+def _get_json(url: str) -> dict:
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/537.36 (KHTML, like Gecko) Chrome Safari",
         "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "application/json,text/plain,*/*",
     }
     r = requests.get(url, headers=headers, timeout=20)
+    print("HTTP", r.status_code, "url=", r.url, "len=", len(r.content), "ct=", r.headers.get("content-type"))
     r.raise_for_status()
-    return r.text
-
-def parse_announcement_list(list_url: str) -> List[Item]:
-    html = _get(list_url)
-    soup = BeautifulSoup(html, "lxml")
-
-    items: List[Item] = []
-
-    # Binance 公告页面结构可能会变。这里用“尽量稳”的策略：
-    # 1) 找到所有指向 /support/announcement/detail/ 的链接
-    # 2) 取链接文本当标题
-    # 3) 在附近尝试提取日期
-    for a in soup.select('a[href*="/support/announcement/detail/"]'):
-        href = a.get("href") or ""
-        title = " ".join(a.get_text(" ", strip=True).split())
-        if not href or not title:
-            continue
-        full_url = urljoin(BASE, href)
-
-        # 尝试在父节点/兄弟节点里找日期
-        date = None
-        container_text = a.parent.get_text(" ", strip=True) if a.parent else ""
-        m = re.search(r"\b20\d{2}-\d{2}-\d{2}\b", container_text)
-        if m:
-            date = m.group(0)
-
-        items.append(Item(title=title, url=full_url, date=date))
-
-    # 去重（同 URL 保留第一个）
-    uniq = {}
-    for it in items:
-        uniq.setdefault(it.url, it)
-    return list(uniq.values())
+    return r.json()
 
 def fetch_sources() -> List[Item]:
-    sources = [
-        # 公告中心总入口（包含所有分类）
-        "https://www.binance.com/en/support/announcement",
+    api = f"{BASE}/bapi/composite/v1/public/cms/article/list/query?type=1&pageNo=1&pageSize=50"
+    payload = _get_json(api)
 
-        # 备用：如果总页结构变了，这个是所有公告的列表入口
-        "https://www.binance.com/en/support/announcement/list/0",
+    # Binance bapi 常见结构：{"code":"000000","message":null,"data":{...}}
+    data = payload.get("data")
+
+    if not isinstance(data, dict):
+        print("Unexpected: payload.data is not dict:", type(data))
+        return []
+
+    # 可能的文章列表字段名集合（不同版本/不同type会变）
+    candidates = [
+        "articles",
+        "articleList",
+        "rows",
+        "list",
+        "data",         # 有时会嵌一层 data
+        "catalogs",     # 有时是按目录返回 catalogs -> articles
+        "result",
     ]
-    all_items: List[Item] = []
-    for url in sources:
-        try:
-            all_items.extend(parse_announcement_list(url))
-        except Exception as e:
-            print(f"Failed to fetch {url}: {e}")
 
-    return all_items
+    articles = None
+
+    # 1) 直接命中
+    for k in candidates:
+        v = data.get(k)
+        if isinstance(v, list) and v and isinstance(v[0], dict) and ("title" in v[0] or "code" in v[0]):
+            articles = v
+            break
+
+    # 2) catalogs 结构：catalogs = [{..., "articles":[...]}]
+    if articles is None and isinstance(data.get("catalogs"), list):
+        merged = []
+        for c in data["catalogs"]:
+            if isinstance(c, dict) and isinstance(c.get("articles"), list):
+                merged.extend([a for a in c["articles"] if isinstance(a, dict)])
+        if merged:
+            articles = merged
+
+    # 3) 嵌套一层 data：data["data"]["articles"]
+    if articles is None and isinstance(data.get("data"), dict):
+        inner = data["data"]
+        for k in candidates:
+            v = inner.get(k)
+            if isinstance(v, list) and v and isinstance(v[0], dict) and ("title" in v[0] or "code" in v[0]):
+                articles = v
+                break
+
+    if articles is None:
+        print("Could not locate articles list. data_keys=", list(data.keys()))
+        # 打印一小段帮助你在 Actions 日志里定位
+        print("data_preview=", str(data)[:1200])
+        return []
+
+    items: List[Item] = []
+    for a in articles:
+        title = (a.get("title") or a.get("headline") or "").strip()
+
+        # 常见标识字段
+        code = a.get("code") or a.get("id") or a.get("articleCode")
+
+        # 有的直接给 url
+        url = a.get("url")
+
+        # 有的给 "releaseDate"/"releaseTime"/"publishDate"
+        date = a.get("releaseDate") or a.get("releaseTime") or a.get("publishDate")
+
+        if not url and code:
+            # detail 路径可能不是这个，但先留着；如果 JSON 有 url 字段会优先用
+            url = f"{BASE}/en/support/announcement/detail/{code}"
+
+        if title and url:
+            items.append(Item(title=title, url=url, date=str(date) if date else None))
+
+    print("parsed_items=", len(items))
+    return items
+
