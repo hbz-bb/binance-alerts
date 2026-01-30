@@ -24,30 +24,58 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 关键：seen.json 用缓存保存，不然每次都会“当成新消息”狂发
+      - name: Ensure seen file exists
+        run: |
+          mkdir -p data
+          test -f data/seen.json || echo "[]" > data/seen.json
+
+      # # 关键：seen.json 用缓存保存，不然每次都会“当成新消息”狂发
+      # - name: Restore cache (seen.json)
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: data/seen.json
+      #     key: seen-${{ github.repository }}-${{ github.ref_name }}
+      #     restore-keys: |
+      #       seen-${{ github.repository }}-
+
+      # - name: Run monitor
+      #   env:
+      #     TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      #     TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      #     SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      #     SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      #     SMTP_USER: ${{ secrets.SMTP_USER }}
+      #     SMTP_PASS: ${{ secrets.SMTP_PASS }}
+      #     EMAIL_TO: ${{ secrets.EMAIL_TO }}
+      #     EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+      #   run: |
+      #     python src/main.py
+
+      # - name: Save cache (seen.json)
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: data/seen.json
+      #     key: seen-${{ github.repository }}-${{ github.ref_name }}-${{ github.run_id }}
       - name: Restore cache (seen.json)
-        uses: actions/cache@v4
+        id: cache-seen
+        uses: actions/cache/restore@v4
         with:
           path: data/seen.json
           key: seen-${{ github.repository }}-${{ github.ref_name }}
           restore-keys: |
             seen-${{ github.repository }}-
-
+    
       - name: Run monitor
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
-          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+        # 其它 SMTP secrets 省略...
         run: |
           python src/main.py
-
+    
       - name: Save cache (seen.json)
-        uses: actions/cache@v4
+        if: always()
+        uses: actions/cache/save@v4
         with:
           path: data/seen.json
-          key: seen-${{ github.repository }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: seen-${{ github.repository }}-${{ github.ref_name }}
