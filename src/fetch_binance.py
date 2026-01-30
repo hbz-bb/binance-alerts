@@ -2,6 +2,13 @@ from __future__ import annotations
 import requests
 from dataclasses import dataclass
 from typing import List, Optional
+import os
+
+DEBUG = os.getenv("DEBUG_BINANCE", "0") == "1"
+
+def dprint(*args, **kwargs):
+    if DEBUG:
+        print(*args, **kwargs)
 
 BASE = "https://www.binance.com"
 
@@ -18,7 +25,8 @@ def _get_json(url: str) -> dict:
         "Accept": "application/json,text/plain,*/*",
     }
     r = requests.get(url, headers=headers, timeout=20)
-    print("HTTP", r.status_code, "url=", r.url, "len=", len(r.content), "ct=", r.headers.get("content-type"))
+    # print("HTTP", r.status_code, "url=", r.url, "len=", len(r.content), "ct=", r.headers.get("content-type"))
+    dprint("HTTP", r.status_code, "url=", r.url, "len=", len(r.content), "ct=", r.headers.get("content-type"))
     r.raise_for_status()
     return r.json()
 
@@ -72,9 +80,11 @@ def fetch_sources() -> List[Item]:
                 break
 
     if articles is None:
-        print("Could not locate articles list. data_keys=", list(data.keys()))
-        # 打印一小段帮助你在 Actions 日志里定位
-        print("data_preview=", str(data)[:1200])
+        # print("Could not locate articles list. data_keys=", list(data.keys()))
+        # # 打印一小段帮助你在 Actions 日志里定位
+        # print("data_preview=", str(data)[:1200])
+        dprint("Could not locate articles list. data_keys=", list(data.keys()))
+        dprint("data_preview=", str(data)[:1200])
         return []
 
     items: List[Item] = []
@@ -97,6 +107,8 @@ def fetch_sources() -> List[Item]:
         if title and url:
             items.append(Item(title=title, url=url, date=str(date) if date else None))
 
-    print("parsed_items=", len(items))
+    # print("parsed_items=", len(items))
+    dprint("parsed_items=", len(items))
+
     return items
 
